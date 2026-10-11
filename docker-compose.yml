@@ -1,0 +1,45 @@
+# 医疗 RAG 实验平台 - MySQL + Redis 服务
+# 使用前请先启动 Docker Desktop，然后执行：
+#   docker compose up -d
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: rag-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: rag_experiments
+      MYSQL_USER: rag
+      MYSQL_PASSWORD: rag_password
+      MYSQL_ROOT_PASSWORD: rag_root_password
+      TZ: Asia/Shanghai
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+    ports:
+      - "3306:3306"
+    volumes:
+      - rag_mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "rag", "-prag_password"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    container_name: rag-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes
+    volumes:
+      - rag_redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  rag_mysql_data:
+  rag_redisdata:

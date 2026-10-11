@@ -1,0 +1,611 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>医疗 RAG 问答 · 投毒攻防演示</title>
+<style>
+  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+  :root {
+    --primary: #6366f1;
+    --primary-dark: #4f46e5;
+    --primary-light: #eef2ff;
+    --danger: #ef4444;
+    --danger-bg: #fef2f2;
+    --success: #10b981;
+    --success-bg: #ecfdf5;
+    --border: #e2e8f0;
+    --bg: #f8fafc;
+    --text: #1e293b;
+    --text-muted: #64748b;
+    --sidebar-w: 280px;
+  }
+  body {
+    font-family: -apple-system, "Microsoft YaHei", "PingFang SC", sans-serif;
+    background: var(--bg);
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    color: var(--text);
+  }
+
+  /* ====== 顶栏 ====== */
+  header {
+    background: #fff;
+    border-bottom: 1px solid var(--border);
+    padding: 10px 20px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    z-index: 10;
+  }
+  header .logo {
+    width: 36px; height: 36px; border-radius: 10px;
+    background: linear-gradient(135deg, var(--primary), #818cf8);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 18px; color: #fff;
+  }
+  header h1 { font-size: 16px; font-weight: 600; }
+  header .subtitle { font-size: 12px; color: var(--text-muted); }
+  header .right { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+  .pill {
+    font-size: 11px; padding: 3px 10px; border-radius: 20px;
+    background: var(--primary-light); color: var(--primary-dark);
+  }
+  .pill.live { background: var(--success-bg); color: #047857; }
+  .pill.live::before {
+    content: ""; display: inline-block; width: 6px; height: 6px;
+    border-radius: 50%; background: var(--success); margin-right: 5px;
+    animation: pulse 2s infinite;
+  }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
+  .icon-btn {
+    background: none; border: 1px solid var(--border); border-radius: 8px;
+    padding: 6px 12px; font-size: 12px; cursor: pointer; color: var(--text-muted);
+    transition: .2s;
+  }
+  .icon-btn:hover { background: var(--primary-light); color: var(--primary); border-color: var(--primary); }
+
+  /* ====== 布局 ====== */
+  .layout { flex: 1; display: flex; overflow: hidden; }
+
+  /* ====== 侧边栏 ====== */
+  .sidebar {
+    width: var(--sidebar-w); background: #fff; border-right: 1px solid var(--border);
+    padding: 18px 16px; overflow-y: auto; flex-shrink: 0;
+    display: flex; flex-direction: column; gap: 20px;
+  }
+  .sb-section h3 {
+    font-size: 11px; font-weight: 700; color: var(--text-muted);
+    text-transform: uppercase; letter-spacing: .5px; margin-bottom: 10px;
+  }
+  .sb-section select {
+    width: 100%; padding: 9px 12px; border: 1px solid var(--border);
+    border-radius: 8px; font-size: 13px; background: #fff; cursor: pointer;
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg width='12' height='12' viewBox='0 0 12 12' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M3 5L6 8L9 5' stroke='%2364748b' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E");
+    background-repeat: no-repeat; background-position: right 10px center;
+  }
+  .sb-section select:focus { outline: none; border-color: var(--primary); }
+  .sb-section select:disabled { background: #f8fafc; color: #94a3b8; cursor: not-allowed; }
+
+  /* 攻击开关 */
+  .attack-card {
+    border: 1px solid var(--border); border-radius: 10px; overflow: hidden;
+    transition: border-color .2s;
+  }
+  .attack-card.active { border-color: var(--danger); box-shadow: 0 0 0 3px rgba(239,68,68,.08); }
+  .attack-header { padding: 12px; display: flex; align-items: center; gap: 10px; cursor: pointer; }
+  .switch { position: relative; width: 38px; height: 22px; flex-shrink: 0; }
+  .switch input { opacity: 0; width: 0; height: 0; }
+  .slider {
+    position: absolute; inset: 0; cursor: pointer;
+    background: #cbd5e1; border-radius: 22px; transition: .25s;
+  }
+  .slider::before {
+    content: ""; position: absolute; width: 16px; height: 16px;
+    left: 3px; top: 3px; background: #fff; border-radius: 50%; transition: .25s;
+  }
+  .switch input:checked + .slider { background: var(--danger); }
+  .switch input:checked + .slider::before { transform: translateX(16px); }
+  .attack-label { font-size: 13px; font-weight: 500; }
+  .attack-body { max-height: 0; overflow: hidden; transition: max-height .3s ease; }
+  .attack-card.active .attack-body { max-height: 400px; }
+  .attack-body-inner { padding: 0 12px 12px; }
+  .target-box {
+    padding: 10px; background: var(--danger-bg); border-radius: 8px;
+    font-size: 12px; color: #991b1b; line-height: 1.6;
+  }
+  .hint { font-size: 11px; color: var(--text-muted); line-height: 1.6; margin-top: 8px; }
+
+  /* 统计 */
+  .stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .stat-item {
+    background: var(--bg); border-radius: 8px; padding: 10px; text-align: center;
+  }
+  .stat-num { font-size: 18px; font-weight: 700; color: var(--primary); }
+  .stat-num.danger { color: var(--danger); }
+  .stat-label { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+
+  /* ====== 聊天区 ====== */
+  .chat-area { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  #chat {
+    flex: 1; overflow-y: auto; padding: 20px 24px;
+    display: flex; flex-direction: column; gap: 16px;
+    scroll-behavior: smooth;
+  }
+  /* 欢迎页 */
+  .welcome { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 20px; }
+  .welcome-icon { font-size: 48px; }
+  .welcome h2 { font-size: 20px; font-weight: 600; }
+  .welcome p { font-size: 14px; color: var(--text-muted); text-align: center; max-width: 360px; line-height: 1.6; }
+  .suggestions { display: flex; flex-direction: column; gap: 8px; width: 100%; max-width: 360px; }
+  .sugg-btn {
+    text-align: left; padding: 12px 16px;
+    background: #fff; border: 1px solid var(--border); border-radius: 10px;
+    font-size: 13px; cursor: pointer; color: var(--text);
+    transition: .2s; display: flex; align-items: center; gap: 8px;
+  }
+  .sugg-btn:hover { border-color: var(--primary); background: var(--primary-light); }
+  .sugg-btn .sugg-icon { font-size: 16px; }
+
+  /* 消息气泡 */
+  .msg { display: flex; gap: 10px; max-width: 80%; animation: fadein .3s ease; }
+  .msg.user { align-self: flex-end; flex-direction: row-reverse; }
+  @keyframes fadein { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+  .avatar {
+    width: 32px; height: 32px; border-radius: 8px; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 13px; font-weight: 600; color: #fff;
+  }
+  .msg.user .avatar { background: var(--primary); }
+  .msg.ai .avatar { background: linear-gradient(135deg, var(--success), #34d399); }
+  .bubble {
+    background: #fff; border: 1px solid var(--border);
+    padding: 12px 16px; border-radius: 4px 12px 12px 12px;
+    font-size: 14px; line-height: 1.8; color: var(--text);
+  }
+  .msg.user .bubble { background: var(--primary); color: #fff; border: none; border-radius: 12px 4px 12px 12px; }
+  .bubble.cursor::after {
+    content: "▌"; animation: blink 1s step-end infinite; color: var(--primary); font-weight: bold;
+  }
+  @keyframes blink { 50% { opacity: 0; } }
+
+  /* Markdown 渲染 */
+  .bubble .md p { margin: 0 0 8px; }
+  .bubble .md p:last-child { margin-bottom: 0; }
+  .bubble .md ul, .bubble .md ol { margin: 4px 0 8px; padding-left: 20px; }
+  .bubble .md li { margin-bottom: 2px; }
+  .bubble .md strong { font-weight: 700; }
+  .bubble .md h1, .bubble .md h2, .bubble .md h3 { font-size: 15px; margin: 10px 0 6px; font-weight: 600; }
+  .bubble .md code {
+    background: rgba(0,0,0,.06); padding: 1px 5px; border-radius: 4px;
+    font-size: 13px; font-family: "Cascadia Code", "Consolas", monospace;
+  }
+  .msg.user .bubble .md code { background: rgba(255,255,255,.2); }
+  .bubble .md blockquote {
+    border-left: 3px solid var(--border); padding-left: 12px;
+    color: var(--text-muted); margin: 8px 0;
+  }
+
+  /* 检索来源 */
+  .sources-wrap { margin-bottom: 8px; }
+  .sources-header {
+    font-size: 12px; color: var(--text-muted); cursor: pointer;
+    display: flex; align-items: center; gap: 6px; user-select: none;
+    padding: 6px 0;
+  }
+  .sources-header .arrow { transition: transform .2s; font-size: 10px; }
+  .sources-header.collapsed .arrow { transform: rotate(-90deg); }
+  .sources-list { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
+  .sources-list.hidden { display: none; }
+  .src-card {
+    font-size: 12px; line-height: 1.6;
+    padding: 8px 10px; border-radius: 8px;
+    background: var(--bg); border-left: 3px solid #94a3b8;
+    color: var(--text-muted);
+  }
+  .src-card.poison {
+    background: var(--danger-bg); border-left-color: var(--danger); color: #991b1b;
+  }
+  .src-tag {
+    display: inline-block; font-size: 10px; font-weight: 700;
+    padding: 1px 6px; border-radius: 4px; margin-right: 5px;
+  }
+  .src-tag.rank { background: #e2e8f0; color: var(--text); }
+  .src-tag.poison { background: var(--danger); color: #fff; }
+  .src-tag.clean { background: var(--success-bg); color: #047857; }
+
+  /* 输入区 */
+  .input-area { padding: 12px 24px 16px; background: #fff; border-top: 1px solid var(--border); }
+  .status-line { font-size: 12px; color: var(--text-muted); margin-bottom: 8px; display: flex; align-items: center; gap: 6px; }
+  .typing-dots span {
+    display: inline-block; width: 5px; height: 5px; border-radius: 50%;
+    background: var(--primary); margin: 0 1px; animation: bounce 1.4s infinite;
+  }
+  .typing-dots span:nth-child(2) { animation-delay: .2s; }
+  .typing-dots span:nth-child(3) { animation-delay: .4s; }
+  @keyframes bounce { 0%,80%,100% { transform: scale(.6); opacity:.4; } 40% { transform: scale(1); opacity:1; } }
+
+  .input-row { display: flex; gap: 10px; align-items: flex-end; }
+  #question {
+    flex: 1; padding: 12px 16px; border: 1px solid var(--border);
+    border-radius: 12px; font-size: 14px; resize: none; min-height: 44px;
+    max-height: 120px; font-family: inherit; line-height: 1.6;
+    transition: border-color .2s;
+  }
+  #question:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px rgba(99,102,241,.1); }
+  #sendBtn {
+    padding: 0 20px; height: 44px; border: none; border-radius: 12px;
+    background: var(--primary); color: #fff; font-size: 14px; cursor: pointer;
+    transition: .2s; display: flex; align-items: center; gap: 6px;
+  }
+  #sendBtn:hover:not(:disabled) { background: var(--primary-dark); }
+  #sendBtn:disabled { background: #a5b4fc; cursor: not-allowed; }
+  .kbd-hint { font-size: 11px; color: var(--text-muted); margin-top: 6px; text-align: right; }
+  .kbd { background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 1px 5px; font-size: 10px; }
+
+  /* 响应式 */
+  @media (max-width: 768px) {
+    :root { --sidebar-w: 0px; }
+    .sidebar { display: none; }
+    .msg { max-width: 95%; }
+    #chat { padding: 16px 12px; }
+    .input-area { padding: 8px 12px 12px; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">🏥</div>
+  <div>
+    <h1>医疗 RAG 智能问答</h1>
+    <div class="subtitle">投毒攻防实验平台</div>
+  </div>
+  <div class="right">
+    <span class="pill" id="modelPill">deepseek-r1</span>
+    <span class="pill live" id="statusPill">就绪</span>
+    <button class="icon-btn" id="clearBtn" title="清空对话">🗑 清空</button>
+  </div>
+</header>
+
+<div class="layout">
+  <!-- 侧边栏 -->
+  <div class="sidebar">
+    <div class="sb-section">
+      <h3>检索参数</h3>
+      <select id="kSelect">
+        <option value="3">k = 3（默认）</option>
+        <option value="5">k = 5</option>
+        <option value="10">k = 10</option>
+        <option value="20">k = 20（稀释投毒）</option>
+      </select>
+    </div>
+
+    <div class="sb-section">
+      <h3>攻击演示</h3>
+      <div class="attack-card" id="attackCard">
+        <div class="attack-header" onclick="document.getElementById('poisonToggle').click()">
+          <label class="switch" onclick="event.stopPropagation()">
+            <input type="checkbox" id="poisonToggle">
+            <span class="slider"></span>
+          </label>
+          <span class="attack-label">注入投毒文档</span>
+        </div>
+        <div class="attack-body">
+          <div class="attack-body-inner">
+            <select id="attackSelect"></select>
+            <div class="target-box" id="targetBox"></div>
+            <p class="hint">15 篇伪装成权威医学文献的投毒文档将临时注入知识库，问答结束后自动清除。</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="sb-section">
+      <h3>本次会话统计</h3>
+      <div class="stats-grid">
+        <div class="stat-item">
+          <div class="stat-num" id="statTotal">0</div>
+          <div class="stat-label">总提问</div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-num danger" id="statPoison">0</div>
+          <div class="stat-label">投毒提问</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 聊天区 -->
+  <div class="chat-area">
+    <div id="chat">
+      <!-- 欢迎页 -->
+      <div class="welcome" id="welcome">
+        <div class="welcome-icon">🩺</div>
+        <h2>医疗知识库问答助手</h2>
+        <p>基于 3000 篇医学文献构建的 RAG 系统，支持投毒攻击演示与防御参数调优。</p>
+        <div class="suggestions">
+          <button class="sugg-btn" data-q="2型糖尿病最新治疗方法是什么？">
+            <span class="sugg-icon">💊</span> 2型糖尿病最新治疗方法是什么？
+          </button>
+          <button class="sugg-btn" data-q="高血压的常规治疗方案有哪些？">
+            <span class="sugg-icon">🩸</span> 高血压的常规治疗方案有哪些？
+          </button>
+          <button class="sugg-btn" data-q="儿童发热如何正确处理？">
+            <span class="sugg-icon">🧒</span> 儿童发热如何正确处理？
+          </button>
+        </div>
+      </div>
+    </div>
+    <div class="input-area">
+      <div class="status-line" id="statusLine"></div>
+      <div class="input-row">
+        <textarea id="question" placeholder="请输入医学问题…" rows="1"></textarea>
+        <button id="sendBtn">发送</button>
+      </div>
+      <div class="kbd-hint"><span class="kbd">Enter</span> 发送 · <span class="kbd">Shift+Enter</span> 换行</div>
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+let busy = false;
+let stats = { total: 0, poison: 0 };
+
+// ---------- Markdown 渲染（轻量版） ----------
+function renderMarkdown(text) {
+  let html = escapeHtml(text);
+  // 代码块（先处理避免被其他替换影响）
+  html = html.replace(/```([\s\S]*?)```/g, (_, c) => `<pre><code>${c.trim()}</code></pre>`);
+  // 行内代码
+  html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+  // 标题
+  html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>');
+  html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>');
+  html = html.replace(/^# (.+)$/gm, '<h1>$1</h1>');
+  // 粗体、斜体
+  html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  html = html.replace(/(?<!\*)\*([^*]+)\*(?!\*)/g, '<em>$1</em>');
+  // 引用
+  html = html.replace(/^&gt; (.+)$/gm, '<blockquote>$1</blockquote>');
+  // 无序列表
+  const lines = html.split('\n');
+  let result = [], inList = false;
+  for (const line of lines) {
+    if (/^\d+\.\s/.test(line)) {
+      if (!inList || result[result.length-1]?.startsWith('<ul>')) { if(inList) result.push('</ul>'); inList=false; }
+      if (!result.some(r => r === '<ol>')) result.push('<ol>');
+      result.push('<li>' + line.replace(/^\d+\.\s/, '') + '</li>');
+    } else if (/^[-*]\s/.test(line)) {
+      if (!result.some(r => r === '<ul>')) result.push('<ul>');
+      result.push('<li>' + line.replace(/^[-*]\s/, '') + '</li>');
+    } else {
+      if (result[result.length-1] === '<li>') {}
+      if (result.some(r => r === '<ul>') && !line.startsWith('<')) { result.push('</ul>'); }
+      if (result.some(r => r === '<ol>') && !line.startsWith('<')) { result.push('</ol>'); }
+      result.push(line);
+    }
+  }
+  if (result.some(r => r === '<ul>')) result.push('</ul>');
+  if (result.some(r => r === '<ol>')) result.push('</ol>');
+  html = result.join('\n');
+  // 段落（连续非标签行包裹 <p>）
+  html = html.split('\n').map(l => {
+    if (!l.trim() || /^<(h\d|ul|ol|li|pre|blockquote)/.test(l) || l === '</ul>' || l === '</ol>')
+      return l;
+    return l.replace(/(.+)/, '<p>$1</p>');
+  }).join('\n');
+  return '<div class="md">' + html + '</div>';
+}
+
+function escapeHtml(str) {
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+// ---------- 攻击场景加载 ----------
+async function loadAttacks() {
+  try {
+    const res = await fetch('/api/attacks');
+    const attacks = await res.json();
+    const sel = $('attackSelect');
+    attacks.forEach(a => {
+      const opt = document.createElement('option');
+      opt.value = a.index;
+      opt.textContent = `[${a.domain}] ${a.question}`;
+      opt.dataset.target = a.target;
+      sel.appendChild(opt);
+    });
+  } catch (e) { console.error('加载攻击场景失败', e); }
+}
+
+$('poisonToggle').addEventListener('change', e => {
+  const on = e.target.checked;
+  $('attackCard').classList.toggle('active', on);
+  $('attackSelect').disabled = !on;
+  updateTargetBox();
+});
+$('attackSelect').addEventListener('change', updateTargetBox);
+
+function updateTargetBox() {
+  const sel = $('attackSelect');
+  if (!sel.disabled && sel.selectedOptions[0]) {
+    const t = sel.selectedOptions[0].dataset.target;
+    $('targetBox').innerHTML = `<strong>🎯 攻击者目标答案：</strong><br>${t}`;
+    $('question').value = sel.selectedOptions[0].textContent.replace(/^\[[^\]]+\]\s*/, '');
+    autoResize();
+  }
+}
+
+// ---------- Textarea 自适应高度 ----------
+function autoResize() {
+  const ta = $('question');
+  ta.style.height = 'auto';
+  ta.style.height = Math.min(ta.scrollHeight, 120) + 'px';
+}
+$('question').addEventListener('input', autoResize);
+
+// ---------- 消息渲染 ----------
+function hideWelcome() {
+  const w = $('welcome');
+  if (w) w.remove();
+}
+
+function addMessage(role, html) {
+  hideWelcome();
+  const chat = $('chat');
+  const msg = document.createElement('div');
+  msg.className = `msg ${role}`;
+  msg.innerHTML = `<div class="avatar">${role === 'user' ? '我' : 'AI'}</div><div class="bubble">${html}</div>`;
+  chat.appendChild(msg);
+  chat.scrollTop = chat.scrollHeight;
+  return msg.querySelector('.bubble');
+}
+
+function renderSources(sources) {
+  const poisonCount = sources.filter(s => s.is_poison).length;
+  const color = poisonCount ? 'var(--danger)' : 'var(--success)';
+  let html = `<div class="sources-wrap">
+    <div class="sources-header" onclick="this.classList.toggle('collapsed'); this.nextElementSibling.classList.toggle('hidden');">
+      <span class="arrow">▼</span> 检索来源 · Top-${sources.length} ·
+      <span style="color:${color};font-weight:700;">${poisonCount} 篇投毒</span>
+    </div>
+    <div class="sources-list">`;
+  sources.forEach(s => {
+    html += `<div class="src-card ${s.is_poison ? 'poison' : ''}">
+      <span class="src-tag rank">#${s.rank}</span>
+      ${s.is_poison ? '<span class="src-tag poison">⚠ 投毒</span>' : '<span class="src-tag clean">正常</span>'}
+      ${escapeHtml(s.content)}
+    </div>`;
+  });
+  html += '</div></div>';
+  return html;
+}
+
+// ---------- 统计更新 ----------
+function updateStats(isPoison) {
+  stats.total++;
+  if (isPoison) stats.poison++;
+  $('statTotal').textContent = stats.total;
+  $('statPoison').textContent = stats.poison;
+}
+
+// ---------- 发送（SSE 流式） ----------
+async function send(presetQuestion) {
+  const question = (presetQuestion || $('question').value).trim();
+  if (!question || busy) return;
+  busy = true;
+  $('sendBtn').disabled = true;
+  $('statusPill').textContent = '生成中';
+  $('statusPill').classList.remove('live');
+  $('statusLine').innerHTML = '<span class="typing-dots"><span></span><span></span><span></span></span> 检索与生成中…';
+
+  const isPoison = $('poisonToggle').checked;
+  addMessage('user', escapeHtml(question));
+  $('question').value = '';
+  autoResize();
+  const answerBubble = addMessage('ai', '');
+  answerBubble.classList.add('cursor');
+
+  const payload = {
+    question, k: parseInt($('kSelect').value),
+    poisoned: isPoison,
+    attack_index: parseInt($('attackSelect').value || '0'),
+  };
+
+  try {
+    const res = await fetch('/api/chat/stream', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '', answerText = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const parts = buffer.split('\n\n');
+      buffer = parts.pop();
+
+      for (const part of parts) {
+        const lines = part.split('\n');
+        let event = '', data = '';
+        lines.forEach(line => {
+          if (line.startsWith('event: ')) event = line.slice(7);
+          if (line.startsWith('data: ')) data = line.slice(6);
+        });
+        if (!event) continue;
+        const obj = JSON.parse(data);
+
+        if (event === 'sources') {
+          answerBubble.innerHTML = renderSources(obj.sources) +
+            '<div class="answer-text" style="margin-top:8px;"></div>';
+        } else if (event === 'token') {
+          answerText += obj.text;
+          const target = answerBubble.querySelector('.answer-text') || answerBubble;
+          target.innerHTML = renderMarkdown(answerText);
+          $('chat').scrollTop = $('chat').scrollHeight;
+        } else if (event === 'done') {
+          $('statusLine').textContent = '✅ 回答完成';
+          $('statusPill').textContent = '就绪';
+          $('statusPill').classList.add('live');
+        } else if (event === 'error') {
+          $('statusLine').textContent = '❌ ' + obj.message;
+          answerBubble.textContent = '生成失败：' + obj.message;
+        }
+      }
+    }
+  } catch (e) {
+    answerBubble.textContent = '请求失败：' + e.message;
+  } finally {
+    answerBubble.classList.remove('cursor');
+    busy = false;
+    $('sendBtn').disabled = false;
+    $('statusPill').textContent = '就绪';
+    $('statusPill').classList.add('live');
+    updateStats(isPoison);
+  }
+}
+
+// ---------- 事件绑定 ----------
+$('sendBtn').addEventListener('click', () => send());
+$('question').addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+});
+$('clearBtn').addEventListener('click', () => {
+  if (!confirm('确定清空所有对话？')) return;
+  $('chat').innerHTML = `<div class="welcome" id="welcome">
+    <div class="welcome-icon">🩺</div><h2>医疗知识库问答助手</h2>
+    <p>基于 3000 篇医学文献构建的 RAG 系统，支持投毒攻击演示与防御参数调优。</p>
+    <div class="suggestions">
+      <button class="sugg-btn" data-q="2型糖尿病最新治疗方法是什么？"><span class="sugg-icon">💊</span> 2型糖尿病最新治疗方法是什么？</button>
+      <button class="sugg-btn" data-q="高血压的常规治疗方案有哪些？"><span class="sugg-icon">🩸</span> 高血压的常规治疗方案有哪些？</button>
+      <button class="sugg-btn" data-q="儿童发热如何正确处理？"><span class="sugg-icon">🧒</span> 儿童发热如何正确处理？</button>
+    </div></div>`;
+  stats = { total: 0, poison: 0 };
+  updateStatsDisplay();
+});
+
+function updateStatsDisplay() {
+  $('statTotal').textContent = stats.total;
+  $('statPoison').textContent = stats.poison;
+}
+
+// 引导问题点击
+document.addEventListener('click', e => {
+  const btn = e.target.closest('.sugg-btn');
+  if (btn) send(btn.dataset.q);
+});
+
+// 初始化
+loadAttacks();
+autoResize();
+</script>
+</body>
+</html>
