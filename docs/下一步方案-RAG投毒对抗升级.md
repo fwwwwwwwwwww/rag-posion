@@ -72,7 +72,7 @@
 
 ## 二、实测基线（出方案前先量出来）
 
-> 数据由 `python tests/e2e_poison_baseline.py` 与 `tests/probe_detector_recall.py` 产出。
+> 数据由 `python tests/e2e_poison_baseline.py` 产出。
 > 模型 `qwen3.5:2b`，向量库 8269 chunk，每次注入 15 条模板投毒文档。
 
 ### 2.1 【最关键】投毒检测器等于失效：召回率 **0/105 = 0%**

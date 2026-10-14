@@ -15,7 +15,10 @@ import RAGblack as exp
 import vectordb
 from attack.detector import HybridPoisonDetector
 
-EXPECTED_CLEAN = 5571
+# 干净重建的实测产出（3000 篇按 chunk_size=500/overlap=50 切分）。
+# 注意：这个值必须与 check_vectordb.py 的 EXPECTED_CLEAN_CHUNKS 保持一致，
+# 否则清理后会报出"少 N 个（误删的干净文档）"这种假警报。
+EXPECTED_CLEAN = 5568
 
 # 清库必须用 GPU 嵌入（CPU 下取文档极慢），且此时不加载对话模型
 d = Chroma(embedding_function=exp.make_embeddings(num_gpu=99),

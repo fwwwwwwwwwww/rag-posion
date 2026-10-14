@@ -47,7 +47,8 @@ class SessionSigner:
             # 为什么必须持久化：signer 会被实例化多次（中间件一份、路由一份），
             # 而且生产环境可能起多个 worker。若每次都各自随机生成，
             # "A 签发的令牌 B 验不过"，表现为**登录成功后立刻 401**。
-            # 实测正是这个 bug（见 tests/probe_cookie.py 的排查记录）。
+            # 实测正是这个 bug（排查脚本已清理，这条验证链路由
+            # tests/test_login_flow.py 保留）。
             secret = self._load_or_create_secret(secret_file)
         self._secret = secret.encode("utf-8")
         self.ttl = ttl
