@@ -15,6 +15,21 @@ export default defineConfig({
   },
   build: {
     outDir: 'dist',
-    chunkSizeWarningLimit: 1500,
+    chunkSizeWarningLimit: 900,
+    rollupOptions: {
+      output: {
+        // 手动分包：把体积大且很少变动的第三方库单独成块。
+        // 好处：业务代码改动后，用户不必重新下载整个 vendor（利用浏览器缓存）。
+        manualChunks(id) {
+          if (!id.includes('node_modules')) return undefined
+          if (id.includes('element-plus')) return 'vendor-element'
+          if (id.includes('@element-plus/icons')) return 'vendor-icons'
+          if (id.includes('/vue/') || id.includes('vue-router') ||
+              id.includes('@vue/')) return 'vendor-vue'
+          if (id.includes('axios')) return 'vendor-axios'
+          return 'vendor'
+        },
+      },
+    },
   },
 })

@@ -37,6 +37,20 @@ app.middleware("http")(auth_middleware)
 @app.on_event("startup")
 def _startup():
     init_db()
+    # 首次启动创建管理员账号。密码来自 ADMIN_PASSWORD 环境变量，
+    # 未配置则随机生成并打印到日志——**绝不使用硬编码默认密码**。
+    try:
+        from app.db.engine import SessionLocal
+        from app.services.auth_service import ensure_default_admin
+
+        db = SessionLocal()
+        try:
+            if ensure_default_admin(db) is None:
+                logging.getLogger("rag").info("已有用户，跳过默认管理员创建")
+        finally:
+            db.close()
+    except Exception:
+        logging.getLogger("rag").exception("初始化默认管理员失败，请手动创建用户")
 
 
 app.include_router(api_router)

@@ -71,15 +71,36 @@ OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 DATABASE_URL = get_database_url()
 
 # ---- RAG 实验相关常量（与 RAGblack.py 保持一致，便于无需加载 RAG 模块时使用）----
-DEFAULT_LLM_MODEL = os.getenv("RAG_LLM_MODEL", "deepseek-r1:latest")
+# 注意：Agent 需要模型具备工具调用能力。实测 deepseek-r1:latest 不支持原生
+# tool_calls（会退回文本 ReAct 通道）；qwen3.5:2b 在工具较多时仍稳定，故选它。
+DEFAULT_LLM_MODEL = os.getenv("RAG_LLM_MODEL", "qwen3.5:2b")
 EMBEDDING_MODEL = os.getenv("RAG_EMBEDDING_MODEL", "qwen3-embedding:latest")
 CHROMA_PERSIST_DIR = os.getenv("CHROMA_PERSIST_DIR", str(BASE_DIR / "rag_poison_exp"))
 RETRIEVAL_K_DEFAULT = int(os.getenv("RETRIEVAL_K_DEFAULT", "3"))
+# Agent 单次提问允许的最大工具调用步数
+AGENT_MAX_STEPS = int(os.getenv("AGENT_MAX_STEPS", "8"))
 
-# ---- 鉴权配置（演示用简易 Token） ----
+# ---- 鉴权配置 ----
+# 旧版静态 Token（保留用于脚本/接口调用，浏览器走登录会话）
 AUTH_TOKEN = os.getenv("AUTH_TOKEN", "rag-demo-token")
-# 不需要鉴权的路径前缀（健康检查、攻击场景列表等公开接口）
-PUBLIC_PATHS = {"/api/health", "/api/attacks", "/docs", "/openapi.json", "/redoc"}
+
+# 会话签名密钥。**生产环境必须显式配置**：
+# 未配置时启动会随机生成，副作用是进程重启后所有登录失效
+# （这比用一个硬编码默认密钥安全得多——后者等于人人都能伪造会话）。
+SESSION_SECRET = os.getenv("SESSION_SECRET", "")
+# 会话有效期（秒），默认 12 小时
+SESSION_TTL = int(os.getenv("SESSION_TTL", str(12 * 3600)))
+SESSION_COOKIE_NAME = os.getenv("SESSION_COOKIE_NAME", "rag_session")
+
+# 不需要鉴权的路径（登录本身、健康检查、文档等）
+PUBLIC_PATHS = {
+    "/api/health",
+    "/api/attacks",
+    "/api/auth/login",
+    "/api/auth/logout",
+    "/api/auth/needs-setup",
+    "/docs", "/openapi.json", "/redoc",
+}
 
 # ---- Celery / Redis 配置 ----
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")

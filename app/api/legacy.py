@@ -85,6 +85,30 @@ async def _ensure_ready_async():
         await asyncio.to_thread(_ensure_ready)
 
 
+_agent_cache = {"agent": None, "db_id": None}
+
+
+def _ensure_agent(db):
+    """为旧接口构造（并缓存）一个工具化 Agent。
+
+    旧接口原先自己做"检索 → 评分过滤 → 生成"，那条链路已随重构移除；
+    现在统一走 Agent，行为与新接口保持一致。
+    """
+    if _agent_cache["agent"] is not None and _agent_cache["db_id"] == id(db):
+        return _agent_cache["agent"]
+
+    from agent import build_agent
+
+    exp = _get_exp()
+    try:
+        kb = exp.load_medical_knowledge_base()
+    except Exception:
+        kb = []
+    agent = build_agent(db=db, llm=None, model=DEFAULT_LLM_MODEL, knowledge_base=kb)
+    _agent_cache.update(agent=agent, db_id=id(db))
+    return agent
+
+
 class ChatRequest(BaseModel):
     question: str = Field(..., min_length=1, max_length=2000,
                           description="用户问题")
@@ -109,24 +133,13 @@ def _get_poison_docs(attack_index: int) -> List[str]:
     return _poison_cache[attack_index]
 
 
-def _grade_filter(llm, question: str, docs) -> List:
-    """相关性评分过滤（与 rag_graph.grade 节点共用同一 Prompt 与解析逻辑）。"""
-    if not docs:
-        return []
-    from rag_graph import GRADE_PROMPT, _parse_grade_ids
-    docs_block = "\n".join(
-        f"{i}. {doc.page_content[:500]}" for i, doc in enumerate(docs, 1))
-    answer = llm.invoke(GRADE_PROMPT.format(
-        question=question, docs_block=docs_block))
-    ids = set(_parse_grade_ids(answer, len(docs)))
-    return [doc for i, doc in enumerate(docs, 1) if i in ids]
-
-
 def _build_sources(docs, poison_content_set: set) -> List[Dict]:
     sources = []
     for rank, doc in enumerate(docs, start=1):
         content = doc.page_content
-        is_poison = content in poison_content_set
+        meta = getattr(doc, "metadata", {}) or {}
+        # 投毒标记有两个来源：本次注入的文档内容，或 Agent 的 check_poison 判定
+        is_poison = (content in poison_content_set) or bool(meta.get("poison_suspect"))
         sources.append({
             "rank": rank,
             "content": content[:300],
@@ -158,10 +171,14 @@ def _save_attack_log(question: str, is_poison: bool,
 
 
 async def _chat_stream(req: ChatRequest):
-    """异步 SSE 生成器：检索 + LLM 流式输出。"""
+    """异步 SSE 生成器：调用工具化 Agent，再把答案按 token 切块推出去。
+
+    与旧实现的区别：不再由代码做"检索 → 评分过滤 → 生成"的固定流程，
+    而是把问题交给 Agent（模型自主决定检索、投毒检测、交叉验证或拒答）。
+    前端事件格式保持不变（sources / token / done / error），因此旧页面无需改动。
+    """
     await _ensure_ready_async()
     db = _state["db"]
-    llm = _state["llm"]
 
     poison_docs: List[str] = []
     poison_ids: List[str] = []
@@ -180,34 +197,25 @@ async def _chat_stream(req: ChatRequest):
             poison_content_set = {c.page_content for c in poison_chunks}
             poison_ids = await asyncio.to_thread(db.add_documents, poison_chunks)
 
-        retriever = db.as_retriever(search_kwargs={"k": req.k})
+        # 交给 Agent 推理（同步阻塞，丢线程池）
+        agent = await asyncio.to_thread(_ensure_agent, db)
+        result = await asyncio.to_thread(agent.run, req.question)
 
-        # 检索（丢线程池避免阻塞）
-        docs = await asyncio.to_thread(retriever.invoke, req.question)
-
-        # 相关性评分过滤（与实验 rag_graph 的 grade 节点同一套防御逻辑）
-        filtered = await asyncio.to_thread(_grade_filter, llm, req.question, docs)
-        if not filtered:
-            filtered = docs  # 全部被过滤时回退原始检索，避免空上下文
-
-        sources = _build_sources(filtered, poison_content_set)
+        sources = _build_sources(result.sources, poison_content_set)
+        # 前端只认 is_poison；Agent 的检测结论也映射到这个字段
+        for s, doc in zip(sources, result.sources):
+            s["is_poison"] = s["is_poison"] or bool(
+                (getattr(doc, "metadata", {}) or {}).get("poison_suspect"))
         yield _sse("sources", {"sources": sources})
 
-        # LLM 流式输出
-        from rag_graph import GENERATE_PROMPT
-        context = "\n\n".join(d.page_content for d in filtered)
+        # 把完整答案分块推送，模拟流式，保持前端契约不变
+        answer_text = result.answer or ""
+        chunk = 24
+        for i in range(0, len(answer_text), chunk):
+            yield _sse("token", {"text": answer_text[i:i + chunk]})
 
-        def _gen():
-            return list(llm.stream(GENERATE_PROMPT.format(
-                context=context, question=req.question)))
-
-        tokens = await asyncio.to_thread(_gen)
-        for token in tokens:
-            if token:
-                answer_text += token
-                yield _sse("token", {"text": token})
-
-        yield _sse("done", {"status": "ok"})
+        yield _sse("done", {"status": "ok", "refused": result.refused,
+                            "steps": result.steps})
         await asyncio.to_thread(
             _save_attack_log, req.question, req.poisoned, answer_text, sources)
 

@@ -73,20 +73,40 @@
       </el-table>
     </el-drawer>
 
-    <!-- 对比图对话框 -->
-    <el-dialog v-model="compareVisible" title="实验指标对比" width="720px">
-      <div ref="chartRef" class="compare-chart" />
+    <!-- 对比图对话框（用轻量 CSS 柱状图，不再引入 echarts） -->
+    <el-dialog v-model="compareVisible" title="实验指标对比" width="760px">
+      <el-empty v-if="!compareData.length" description="请先选择两个以上实验进行对比" />
+      <template v-else>
+        <MetricBars :metrics="compareMetrics" :rows="compareRows" x-field="label"
+                    :height="150" />
+        <el-divider />
+        <el-table :data="compareData" size="small">
+          <el-table-column prop="id" label="ID" width="60" />
+          <el-table-column prop="name" label="实验" min-width="140" show-overflow-tooltip />
+          <el-table-column prop="exp_type" label="类型" width="90" />
+          <el-table-column prop="result_count" label="结果数" width="80" />
+          <el-table-column label="平均指标" min-width="240">
+            <template #default="{ row }">
+              <el-tag v-for="(v, k) in row.avg_metrics" :key="k" size="small"
+                      class="metric-tag">
+                {{ k }}: {{ Number(v).toFixed(3) }}
+              </el-tag>
+              <span v-if="!Object.keys(row.avg_metrics || {}).length" class="muted">-</span>
+            </template>
+          </el-table-column>
+        </el-table>
+      </template>
     </el-dialog>
   </div>
 </template>
 
 <script setup>
-import { onMounted, reactive, ref } from 'vue'
-import * as echarts from 'echarts'
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { api } from '../api'
+import MetricBars from '../components/MetricBars.vue'
 
-const form = reactive({ name: '', exp_type: 'attack', model_name: 'deepseek-r1:latest' })
+const form = reactive({ name: '', exp_type: 'attack', model_name: 'qwen3.5:2b' })
 const autoStart = ref(true)
 const experiments = ref([])
 const selected = ref([])
@@ -94,46 +114,83 @@ const drawerVisible = ref(false)
 const compareVisible = ref(false)
 const detail = ref({})
 const results = ref([])
-const chartRef = ref(null)
+const compareData = ref([])
 let pollTimer = null
+
+// 对比图用的指标定义（每个指标一组柱，x 轴是实验）
+const compareMetrics = computed(() => {
+  const keys = [...new Set(compareData.value.flatMap(
+    (d) => Object.keys(d.avg_metrics || {})))]
+  const colors = ['blue', 'green', 'red', 'amber', 'violet']
+  return keys.map((k, i) => ({
+    key: k, label: k, cls: colors[i % colors.length],
+  }))
+})
+
+const compareRows = computed(() => compareData.value.map((d) => ({
+  label: `#${d.id}`,
+  ...(d.avg_metrics || {}),
+})))
 
 function statusType(status) {
   return { pending: 'info', running: 'warning', completed: 'success', failed: 'danger' }[status] || 'info'
 }
 
 async function loadList() {
-  experiments.value = await api.listExperiments({ limit: 50 })
+  try {
+    experiments.value = await api.listExperiments({ limit: 50 })
+  } catch (e) {
+    ElMessage.error(e.message)
+  }
 }
 
 async function create() {
   if (!form.name.trim()) return ElMessage.warning('请输入实验名称')
-  await api.createExperiment(form, autoStart.value)
-  ElMessage.success('实验已创建')
-  loadList()
+  try {
+    await api.createExperiment(form, autoStart.value)
+    ElMessage.success('实验已创建')
+    if (autoStart.value) startPolling()
+    await loadList()
+  } catch (e) {
+    ElMessage.error(e.message)
+  }
 }
 
 async function start(row) {
-  await api.startExperiment(row.id)
-  ElMessage.success(`实验 #${row.id} 已开始`)
-  loadList()
-  startPolling()
+  try {
+    await api.startExperiment(row.id)
+    ElMessage.success(`实验 #${row.id} 已开始`)
+    await loadList()
+    startPolling()
+  } catch (e) {
+    ElMessage.error(e.message)
+  }
 }
 
 function startPolling() {
   clearInterval(pollTimer)
   pollTimer = setInterval(async () => {
     await loadList()
-    if (!experiments.value.some((e) => e.status === 'running')) clearInterval(pollTimer)
+    // 没有 running 的实验就停止轮询，避免无意义的请求
+    if (!experiments.value.some((e) => e.status === 'running')) {
+      clearInterval(pollTimer)
+      pollTimer = null
+    }
   }, 5000)
 }
 
-async function pollOnce(row) {
-  experiments.value = await api.listExperiments({ limit: 50 })
+async function pollOnce() {
+  await loadList()
 }
 
 async function showDetail(row) {
   detail.value = row
-  results.value = await api.getExperimentResults(row.id)
+  try {
+    results.value = await api.getExperimentResults(row.id)
+  } catch (e) {
+    results.value = []
+    ElMessage.error(e.message)
+  }
   drawerVisible.value = true
 }
 
@@ -142,33 +199,22 @@ function onSelectionChange(rows) {
 }
 
 async function compare() {
-  compareVisible.value = true
-  const data = await api.compareExperiments(selected.value.map((e) => e.id))
-  // 等待 DOM 渲染后画图
-  setTimeout(() => {
-    const chart = echarts.init(chartRef.value)
-    const metricKeys = [...new Set(data.flatMap((d) => Object.keys(d.avg_metrics)))]
-    chart.setOption({
-      tooltip: { trigger: 'axis' },
-      legend: { data: data.map((d) => `#${d.id} ${d.name}`) },
-      grid: { left: 60, right: 20, bottom: 80 },
-      xAxis: { type: 'category', data: metricKeys, axisLabel: { rotate: 30 } },
-      yAxis: { type: 'value' },
-      series: data.map((d) => ({
-        name: `#${d.id} ${d.name}`,
-        type: 'bar',
-        data: metricKeys.map((k) => d.avg_metrics[k] ?? 0),
-      })),
-    })
-  }, 100)
+  if (selected.value.length < 2) {
+    return ElMessage.warning('请至少选择两个实验')
+  }
+  try {
+    compareData.value = await api.compareExperiments(selected.value.map((e) => e.id))
+    compareVisible.value = true
+  } catch (e) {
+    ElMessage.error(e.message)
+  }
 }
 
 onMounted(loadList)
+// 离开页面必须清掉定时器，否则会一直轮询
+onBeforeUnmount(() => clearInterval(pollTimer))
 </script>
 
 <style scoped>
-.mt12 { margin-top: 12px; }
-.mb12 { margin-bottom: 12px; }
 .metric-tag { margin: 2px 4px 2px 0; }
-.compare-chart { width: 100%; height: 420px; }
 </style>

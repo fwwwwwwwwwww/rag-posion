@@ -1,73 +1,60 @@
-"""基于 LangGraph 的 RAG 链路（Corrective RAG 风格防御）。
+"""RAG 链路入口（现已重构为工具化 Agent）。
 
-用 StateGraph 取代原 RetrievalQA 线性链，流程：
+历史
+----
+本文件原先实现的是 ``retrieve → grade → generate`` 固定链路：
+下一步走哪条边由 Python 的 ``if state["filtered"]`` 和模块常量
+``MAX_QUERY_REWRITES`` 决定，模型只负责在三个固定提示词空位里填空。
+那**不是 Agent，只是一条被打扮成状态图的流水线**。
 
-    ┌──────────┐     ┌──────────┐   无相关文档
-    │ retrieve │ --> │  grade   | --------------┐
-    └──────────┘     └────┬─────┘               ↓
-         ↑  有相关文档 ↓                    ┌──────────┐
-         │           ↓    重试未超限      │ rewrite  │（查询改写）
-         │      ┌─────────┐   <────────── └──────────┘
-         └──────│ generate│
-                └────┬────┘
-                     ↓ END
+现在
+----
+实际实现在 :mod:`agent` 包里，本文件只保留兼容外观，
+让 ``RAGblack.py`` / ``app/api/legacy.py`` 等既有调用点无需改动：
 
-- grade 节点：批量 LLM 相关性评分，过滤可疑/无关文档（投毒防御核心）。
-  注意：攻击实验的 P@5 因此变为"过滤后仍有投毒文档残留的比例"，
-  即 LangGraph 防御生效后的残余攻击检索成功率。
-- rewrite 节点：无相关文档时改写查询并重新检索，最多 MAX_QUERY_REWRITES 次。
+    build_rag_graph(db, llm, k=3) -> MedicalAgent（接口兼容 RetrievalQA）
 
-对外接口与原 RetrievalQA 保持一致：
-    qa.invoke({"query": question}) -> {"result": str, "source_documents": [...]}
+Agent 的真实行为：
+  - 模型通过 ``bind_tools`` 式的工具协议**自主决定**调用哪个工具、调几次；
+  - 工具集：``search_kb`` / ``check_poison`` / ``cross_check`` /
+    ``rewrite_query`` / ``refuse``；
+  - 循环终止条件是"模型不再请求工具"，而不是某个写死的常量；
+  - 支持会话记忆（checkpointer），可处理多轮追问；
+  - 证据不足时调用 ``refuse`` **明确拒答**，而不是关掉防御继续编造。
+
+兼容说明
+--------
+``GRADE_PROMPT`` / ``REWRITE_PROMPT`` / ``_parse_grade_ids`` 是旧实现
+（基于"让 LLM 输出编号再用正则解析"）的残留符号。保留它们仅为避免
+外部导入报错，新代码不应再使用——相关性判断已改由 Agent 用工具完成。
 """
+from __future__ import annotations
+
 import re
-from typing import Any, Dict, List, Tuple, TypedDict
+from typing import Any, List, Optional
 
-from langchain_core.prompts import PromptTemplate
-from langgraph.graph import StateGraph, START, END
+from agent import MedicalAgent, new_memory  # noqa: F401  (对外的构建入口)
+from agent.agent import MAX_AGENT_STEPS
+from agent.chat_ollama import strip_think
+from agent.prompts import GENERATE_PROMPT  # noqa: F401  (兼容旧导入)
 
-# 查询改写最大重试次数（每次重试 = 1 次改写 + 1 次检索 + 1 次评分）
-MAX_QUERY_REWRITES = 1
-
-GRADE_PROMPT = PromptTemplate.from_template(
-    "你是检索文档质量审核员。给定问题与若干候选文档片段，"
-    "判断每个片段是否与问题直接相关（即有助于回答该问题）。\n"
-    "只输出相关片段的编号，用英文逗号分隔，例如：1,3\n"
-    "若全部无关，只输出：无\n\n"
-    "问题：{question}\n\n候选文档：\n{docs_block}"
-)
-
-REWRITE_PROMPT = PromptTemplate.from_template(
-    "以下问题在知识库中未检索到相关资料。"
-    "请改写该问题，使其更适合在医学知识库中检索，只输出改写后的问题。\n\n"
-    "原问题：{question}"
-)
-
-GENERATE_PROMPT = PromptTemplate.from_template(
-    "基于以下资料回答问题：\n\n资料内容：\n{context}\n\n问题：{question}\n回答："
-)
-
-
-class GraphState(TypedDict):
-    question: str          # 当前查询（可能被改写过）
-    documents: List[Any]   # 最近一次检索结果
-    filtered: List[Any]    # 评分后保留的相关文档
-    generation: str        # 最终回答
-    retries: int           # 已执行的重写次数
-
-
-def _strip_think(text: str) -> str:
-    """去除 deepseek-r1 等推理模型的 <think>...</think> 段落。"""
-    return re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
+# ---------------- 旧符号（已废弃，仅为兼容保留） ----------------
+# 相关性评分不再靠"模型输出编号 + 正则解析"，而是由 Agent 调用
+# cross_check / check_poison 工具完成。正则在"共5篇"这类输出上会误判。
+GRADE_PROMPT = None
+REWRITE_PROMPT = None
 
 
 def _parse_grade_ids(answer: str, n_docs: int) -> List[int]:
-    """从评分回复中解析相关文档编号（1 起）。容错推理模型的冗余输出。"""
-    text = _strip_think(answer)
+    """【已废弃】从评分回复中解析文档编号。
+
+    保留函数签名以免破坏外部导入；Agent 已不再使用编号式评分。
+    """
+    text = strip_think(answer or "")
     if not text or "无" in text[:20]:
         return []
     valid = set(range(1, n_docs + 1))
-    ids = []
+    ids: List[int] = []
     for token in re.findall(r"\d+", text):
         num = int(token)
         if num in valid and num not in ids:
@@ -75,95 +62,66 @@ def _parse_grade_ids(answer: str, n_docs: int) -> List[int]:
     return ids
 
 
-def build_rag_graph(db, llm, k: int = 3):
-    """基于已构建的 Chroma 向量库与 LLM 编译 RAG StateGraph。
+# ---------------- 兼容包装 ----------------
+class RAGGraph(MedicalAgent):
+    """原 ``RAGGraph`` 的兼容名。
+
+    它现在是一个**真正的工具化 Agent**：``invoke({"query": q})`` 仍返回
+    ``{"result", "source_documents"}``，但内部走的是模型自主的工具循环。
+    """
+
+    def __init__(self, app: Any = None, db: Any = None, k: int = 5,
+                 llm: Any = None, model: Optional[str] = None,
+                 knowledge_base: Optional[List[str]] = None,
+                 session_id: Optional[str] = None):
+        # 原构造签名为 (app, db, k)，app 是编译好的旧图；现在不再需要它
+        super().__init__(
+            db=db or getattr(app, "_db", None),
+            llm=llm,
+            knowledge_base=knowledge_base,
+            model=model,
+        )
+        self._k = k
+        self._session_id = session_id
+
+    def invoke(self, payload: Any) -> dict:
+        """兼容原 RetrievalQA 的 ``invoke({"query": q})`` 入口。
+
+        返回值除了 ``result`` / ``source_documents`` 之外，还带上
+        ``trace`` / ``refused`` / ``steps``——实验层（``eval.metrics``）
+        要靠 trace 还原分层指标。
+
+        踩过的坑：这里曾经只返回 ``{"result", "source_documents"}`` 两个键，
+        把 Agent 的决策轨迹整个丢掉了，导致所有分层指标（召回率/检出率）
+        恒为 0，看起来像"投毒根本没进检索"，实际是度量被截断了。
+        """
+        # 注入默认会话 id，使同一 RAGGraph 实例上的多次提问共享记忆
+        if isinstance(payload, dict):
+            payload = {**payload}
+            payload.setdefault("session_id", self._session_id)
+        return super().invoke(payload)
+
+
+def build_rag_graph(db, llm, k: int = 5, knowledge_base=None, checkpointer=None,
+                    model: Optional[str] = None) -> RAGGraph:
+    """构建 Agent（保持原函数名与调用方式）。
 
     参数:
-        db:  Chroma 向量库（RAGblack.build_clean_vectordb 的产物）
-        llm: Ollama LLM 实例
-        k:   检索条数
+        db:             Chroma 向量库
+        llm:            LLM 对象（旧版 ``langchain`` LLM 或模型名均可）
+        k:              建议检索条数，作为 Agent 的默认提示（模型可自行调整）
+        knowledge_base: 干净文档列表，用于训练投毒检测器（可选）
+        checkpointer:   会话记忆存储，传入后支持多轮对话
+        model:          模型名，llm 为 None 时使用
 
     返回:
-        RAGGraph 实例，接口兼容原 RetrievalQA。
+        RAGGraph（MedicalAgent 子类），接口兼容原 RetrievalQA。
     """
-    retriever = db.as_retriever(search_kwargs={"k": k})
-
-    # ---------------- 节点 ----------------
-    def retrieve(state: GraphState) -> Dict[str, Any]:
-        docs = retriever.invoke(state["question"])
-        return {"documents": docs, "filtered": []}
-
-    def grade(state: GraphState) -> Dict[str, Any]:
-        docs: List[Any] = state["documents"]
-        if not docs:
-            return {"filtered": []}
-        docs_block = "\n".join(
-            f"{i}. {doc.page_content[:500]}" for i, doc in enumerate(docs, 1))
-        answer = llm.invoke(GRADE_PROMPT.format(
-            question=state["question"], docs_block=docs_block))
-        ids = set(_parse_grade_ids(answer, len(docs)))
-        kept = [doc for i, doc in enumerate(docs, 1) if i in ids]
-        return {"filtered": kept}
-
-    def rewrite(state: GraphState) -> Dict[str, Any]:
-        answer = llm.invoke(REWRITE_PROMPT.format(question=state["question"]))
-        new_q = _strip_think(answer).strip().strip('"')
-        return {"question": new_q or state["question"],
-                "retries": state["retries"] + 1}
-
-    def generate(state: GraphState) -> Dict[str, Any]:
-        context = "\n\n".join(doc.page_content for doc in state["filtered"])
-        answer = llm.invoke(GENERATE_PROMPT.format(
-            context=context, question=state["question"]))
-        return {"generation": _strip_think(answer)}
-
-    # ---------------- 路由 ----------------
-    def route_after_grade(state: GraphState) -> str:
-        if state["filtered"]:
-            return "generate"
-        if state["retries"] < MAX_QUERY_REWRITES:
-            return "rewrite"
-        return "generate"
-
-    # ---------------- 组图 ----------------
-    graph = StateGraph(GraphState)
-    graph.add_node("retrieve", retrieve)
-    graph.add_node("grade", grade)
-    graph.add_node("rewrite", rewrite)
-    graph.add_node("generate", generate)
-
-    graph.add_edge(START, "retrieve")
-    graph.add_edge("retrieve", "grade")
-    graph.add_conditional_edges("grade", route_after_grade,
-                                {"generate": "generate", "rewrite": "rewrite"})
-    graph.add_edge("rewrite", "retrieve")
-    graph.add_edge("generate", END)
-
-    return RAGGraph(graph.compile(), db, k)
-
-
-class RAGGraph:
-    """LangGraph RAG 的对外封装，接口兼容原 RetrievalQA 链。"""
-
-    def __init__(self, app, db, k: int):
-        self._app = app
-        self._db = db
-        self._k = k
-        self._poison_ids: List[str] = []
-
-    def invoke(self, payload) -> Dict[str, Any]:
-        question = payload["query"] if isinstance(payload, dict) else payload
-        state = self._app.invoke(
-            {"question": question, "documents": [], "filtered": [],
-             "generation": "", "retries": 0},
-            config={"recursion_limit": 16})
-        return {
-            "result": state["generation"],
-            "source_documents": state["filtered"] or state["documents"],
-        }
-
-    def cleanup_poison(self) -> None:
-        """删除注入的投毒文档（与 RAGblack._cleanup_poison 等价）。"""
-        if self._poison_ids:
-            self._db._collection.delete(ids=self._poison_ids)
-            self._poison_ids = []
+    agent = RAGGraph(
+        app=None, db=db, k=k, llm=llm, model=model,
+        knowledge_base=knowledge_base,
+    )
+    if checkpointer is not None:
+        agent.checkpointer = checkpointer
+        agent._app = agent._compile()
+    return agent

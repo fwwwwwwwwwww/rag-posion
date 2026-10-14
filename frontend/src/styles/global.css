@@ -1,0 +1,98 @@
+/* 全局样式：统一设计变量，避免各页面各写一套颜色 */
+:root {
+  --brand: #4f46e5;
+  --brand-light: #6366f1;
+  --brand-soft: #eef2ff;
+  --bg-page: #f6f8fb;
+  --bg-card: #ffffff;
+  --border: #e5e9f0;
+  --text-1: #1e293b;
+  --text-2: #475569;
+  --text-3: #94a3b8;
+  --success: #16a34a;
+  --warning: #d97706;
+  --danger: #dc2626;
+  --radius: 10px;
+  --radius-lg: 14px;
+  --shadow-sm: 0 1px 2px rgba(15, 23, 42, .06);
+  --shadow: 0 2px 8px rgba(15, 23, 42, .08);
+  --gap: 16px;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+html, body, #app { height: 100%; }
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei",
+    "PingFang SC", "Hiragino Sans GB", sans-serif;
+  font-size: 14px;
+  color: var(--text-1);
+  background: var(--bg-page);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* 等宽字体：用于轨迹、坐标、哈希等 */
+.mono, code, pre {
+  font-family: "JetBrains Mono", Consolas, Monaco, "Courier New", monospace;
+}
+
+/* ---------- 通用工具类 ---------- */
+.page { padding: 18px; }
+.mt8 { margin-top: 8px; }
+.mt12 { margin-top: 12px; }
+.mt16 { margin-top: 16px; }
+.mb8 { margin-bottom: 8px; }
+.mb12 { margin-bottom: 12px; }
+.muted { color: var(--text-3); }
+.hint { font-size: 12px; color: var(--text-3); line-height: 1.6; }
+.text-2 { color: var(--text-2); }
+.ellipsis { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+/* ---------- Element Plus 微调 ---------- */
+.el-card {
+  border-radius: var(--radius-lg) !important;
+  border-color: var(--border) !important;
+  box-shadow: var(--shadow-sm) !important;
+}
+.el-card__header {
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--text-1);
+  border-bottom-color: var(--border) !important;
+}
+.el-table { font-size: 13px; }
+.el-table th.el-table__cell {
+  background: #f8fafc !important;
+  color: var(--text-2);
+  font-weight: 600;
+}
+.el-tag { border-radius: 6px; }
+.el-button { border-radius: 8px; }
+
+/* 滚动条 */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+::-webkit-scrollbar-track { background: transparent; }
+
+/* ---------- 页面切换动画 ---------- */
+.fade-slide-enter-active { transition: all .18s ease-out; }
+.fade-slide-leave-active { transition: all .12s ease-in; }
+.fade-slide-enter-from { opacity: 0; transform: translateY(6px); }
+.fade-slide-leave-to { opacity: 0; }
+
+/* ---------- 响应式 ---------- */
+@media (max-width: 1100px) {
+  .page { padding: 12px; }
+}

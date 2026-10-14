@@ -4,6 +4,9 @@
 !.env.example
 .env.local
 .env.*.local
+# 自动生成的会话签名密钥（泄露即可伪造任意用户会话）
+.session_secret
+**/.session_secret
 
 # ===== Python 缓存 / 字节码 =====
 __pycache__/

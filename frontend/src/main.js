@@ -1,22 +1,32 @@
 import { createApp } from 'vue'
-import { createRouter, createWebHashHistory } from 'vue-router'
 import ElementPlus from 'element-plus'
+import zhCn from 'element-plus/es/locale/lang/zh-cn'
 import 'element-plus/dist/index.css'
-import App from './App.vue'
-import ChatView from './views/ChatView.vue'
-import ExperimentsView from './views/ExperimentsView.vue'
-import PoisonDocsView from './views/PoisonDocsView.vue'
-import LogsView from './views/LogsView.vue'
+import * as ElementPlusIconsVue from '@element-plus/icons-vue'
 
-const router = createRouter({
-  history: createWebHashHistory(),
-  routes: [
-    { path: '/', redirect: '/chat' },
-    { path: '/chat', component: ChatView, meta: { title: '问答演示' } },
-    { path: '/experiments', component: ExperimentsView, meta: { title: '实验管理' } },
-    { path: '/poison-docs', component: PoisonDocsView, meta: { title: '投毒文档' } },
-    { path: '/logs', component: LogsView, meta: { title: '攻击日志' } },
-  ],
+import App from './App.vue'
+import router from './router'
+import { onUnauthorized } from './api'
+import { clearUser } from './stores/auth'
+import './styles/global.css'
+
+const app = createApp(App)
+
+// 全局注册图标：模板里可直接 <el-icon><Aim /></el-icon>
+for (const [name, comp] of Object.entries(ElementPlusIconsVue)) {
+  app.component(name, comp)
+}
+
+app.use(router)
+app.use(ElementPlus, { locale: zhCn })   // 中文文案
+
+// 会话失效：清本地状态并跳登录页（记住原地址，登录后回跳）
+onUnauthorized(() => {
+  clearUser()
+  const current = router.currentRoute.value
+  if (!current.meta.public) {
+    router.replace({ name: 'login', query: { redirect: current.fullPath } })
+  }
 })
 
-createApp(App).use(router).use(ElementPlus).mount('#app')
+app.mount('#app')
