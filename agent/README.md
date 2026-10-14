@@ -38,7 +38,7 @@ retrieve → grade → generate
 | 工具 | 作用 |
 |---|---|
 | `search_kb` | 向量检索知识库（获取事实依据的唯一入口） |
-| `check_poison` | 投毒嫌疑检测（接入 IsolationForest 检测器） |
+| `check_poison` | 投毒嫌疑检测（接入 `attack.detector.HybridPoisonDetector`，规则 + LLM） |
 | `cross_check` | 交叉验证某说法是否有**多篇独立文档**支持 |
 | `rewrite_query` | 带反馈的查询改写（检索不到时用） |
 | `refuse` | 明确拒答出口（证据不足时不编造） |
@@ -61,7 +61,6 @@ agent = build_agent(
     db=chroma_db,
     llm=None,                    # 传 None 时按 model 名新建支持工具调用的对话层
     model="qwen3.5:2b",
-    knowledge_base=clean_docs,   # 用于训练投毒检测器
     checkpointer=new_memory(),   # 传了才有会话记忆
     max_steps=6,
 )
@@ -110,5 +109,6 @@ python tests/e2e_agent_real.py --poison   # 额外注入投毒文档
 - **跑实验与端到端脚本需要放开文件限制**：DSH 沙箱在 `workspace-write` 下会拦截
   SQLite 的文件锁，Chroma 的元数据库会报 `attempt to write a readonly database`，
   导致向量库打不开。把会话切到**完全权限**即可。
-- 检测器（IsolationForest）首次调用 `check_poison` 时会在知识库上训练，需要数十秒，
-  之后缓存在进程内。
+- 检测器是 ``attack.detector.HybridPoisonDetector``（规则前置 + 灰区 LLM 判定），
+  **不需要干净语料训练**，首次调用 `check_poison` 时惰性构建并缓存在进程内。
+  早期版本用的 IsolationForest 对模板投毒召回率为 0%，已弃用（见该模块顶部说明）。

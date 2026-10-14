@@ -4,10 +4,9 @@
 本接口跑的是**自适应攻击战役**——攻击 Agent 每轮根据防御反馈换策略，
 产出攻击轨迹（`attack_iterations` 表），而不只是一个 ASR 数字。
 """
-import asyncio
 import logging
 import threading
-from typing import Any, Dict, List, Optional
+from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -15,7 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.config import DEFAULT_LLM_MODEL
-from app.db.engine import SessionLocal, get_db
+from app.db.engine import get_db
 from app.db.models import AttackIteration
 
 logger = logging.getLogger("rag.api.attacks")

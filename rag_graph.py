@@ -34,7 +34,6 @@ import re
 from typing import Any, List, Optional
 
 from agent import MedicalAgent, new_memory  # noqa: F401  (对外的构建入口)
-from agent.agent import MAX_AGENT_STEPS
 from agent.chat_ollama import strip_think
 from agent.prompts import GENERATE_PROMPT  # noqa: F401  (兼容旧导入)
 
@@ -72,13 +71,11 @@ class RAGGraph(MedicalAgent):
 
     def __init__(self, app: Any = None, db: Any = None, k: int = 5,
                  llm: Any = None, model: Optional[str] = None,
-                 knowledge_base: Optional[List[str]] = None,
                  session_id: Optional[str] = None):
         # 原构造签名为 (app, db, k)，app 是编译好的旧图；现在不再需要它
         super().__init__(
             db=db or getattr(app, "_db", None),
             llm=llm,
-            knowledge_base=knowledge_base,
             model=model,
         )
         self._k = k
@@ -102,7 +99,7 @@ class RAGGraph(MedicalAgent):
         return super().invoke(payload)
 
 
-def build_rag_graph(db, llm, k: int = 5, knowledge_base=None, checkpointer=None,
+def build_rag_graph(db, llm, k: int = 5, checkpointer=None,
                     model: Optional[str] = None) -> RAGGraph:
     """构建 Agent（保持原函数名与调用方式）。
 
@@ -110,7 +107,6 @@ def build_rag_graph(db, llm, k: int = 5, knowledge_base=None, checkpointer=None,
         db:             Chroma 向量库
         llm:            LLM 对象（旧版 ``langchain`` LLM 或模型名均可）
         k:              建议检索条数，作为 Agent 的默认提示（模型可自行调整）
-        knowledge_base: 干净文档列表，用于训练投毒检测器（可选）
         checkpointer:   会话记忆存储，传入后支持多轮对话
         model:          模型名，llm 为 None 时使用
 
@@ -119,7 +115,6 @@ def build_rag_graph(db, llm, k: int = 5, knowledge_base=None, checkpointer=None,
     """
     agent = RAGGraph(
         app=None, db=db, k=k, llm=llm, model=model,
-        knowledge_base=knowledge_base,
     )
     if checkpointer is not None:
         agent.checkpointer = checkpointer

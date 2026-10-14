@@ -4,7 +4,6 @@
 实验执行依赖 RAGblack 中的实验函数（需要 Ollama 服务与医学知识库），
 因此采用后台线程执行，前端通过状态轮询获知进度。
 """
-import json
 import logging
 import threading
 from datetime import datetime

@@ -24,6 +24,7 @@ from langchain_chroma import Chroma
 from langchain_community.embeddings import OllamaEmbeddings
 
 import RAGblack as exp
+import vectordb
 from agent import build_agent
 from agent import new_memory as exp_new_memory
 
@@ -55,20 +56,13 @@ def show_trace(result, title):
 def main():
     embed = OllamaEmbeddings(model=EMBED_MODEL, base_url=BASE_URL)
     db = Chroma(embedding_function=embed, persist_directory=CHROMA_DIR)
-    count = db._collection.count()
+    count = vectordb.count_chunks(db)
     print(f"向量库: {CHROMA_DIR}  共 {count} 个 chunk")
     if count == 0:
         print("向量库为空，请先运行 RAGblack 的实验构建向量库。")
         return 1
 
-    try:
-        kb = exp.load_medical_knowledge_base()
-    except Exception as e:
-        print(f"知识库加载失败（检测器训练会降级）：{e}")
-        kb = []
-    print(f"知识库文档: {len(kb)} 篇")
-
-    agent = build_agent(db=db, llm=None, model=MODEL, knowledge_base=kb,
+    agent = build_agent(db=db, llm=None, model=MODEL,
                         checkpointer=exp_new_memory(), max_steps=4)
     print(f"模型: {MODEL}  工具调用通道: {agent.llm.protocol()}")
 
@@ -115,7 +109,7 @@ def main():
               f"{'是' if '指的是' not in r2.answer and '请告诉我' not in r2.answer else '否'}")
     finally:
         if poison_ids:
-            db._collection.delete(ids=poison_ids)
+            vectordb.delete_ids(db, poison_ids)
             print(f"已清理 {len(poison_ids)} 个投毒 chunk")
 
     return 0

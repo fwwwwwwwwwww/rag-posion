@@ -14,6 +14,7 @@ from typing import Any, Dict, List, Optional
 
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
+import vectordb
 from .attacker import AdaptiveAttacker
 
 logger = logging.getLogger("rag.attack.campaign")
@@ -55,7 +56,6 @@ def run_campaign(
         persist:       是否把每轮结果写入 attack_iterations 表
     """
     from eval.metrics import AnswerJudge, collect_metrics
-    from attack import strategies as strat_mod
 
     question = task["question"]
     claim = task["target_answer"]
@@ -118,7 +118,7 @@ def run_campaign(
         finally:
             # 必须清理，否则投毒累积到下一轮，指标就失去意义
             try:
-                db._collection.delete(ids=ids)
+                vectordb.delete_ids(db, ids)
             except Exception as e:
                 logger.warning("清理投毒失败：%s", e)
 

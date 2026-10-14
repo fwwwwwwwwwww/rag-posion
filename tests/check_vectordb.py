@@ -11,9 +11,9 @@ import sys
 sys.path.insert(0, r"E:\RAG2")
 
 from langchain_chroma import Chroma
-from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 import RAGblack as exp
+import vectordb
 from attack.detector import HybridPoisonDetector
 
 EXPECTED_CLEAN_CHUNKS = 5571   # 3000 篇干净文档按 chunk_size=500/overlap=50 切分的结果
@@ -22,7 +22,7 @@ EXPECTED_CLEAN_CHUNKS = 5571   # 3000 篇干净文档按 chunk_size=500/overlap=
 def main():
     d = Chroma(embedding_function=exp.make_embeddings(),
                persist_directory=exp.CHROMA_PERSIST_DIR)
-    n = d._collection.count()
+    n = vectordb.count_chunks(d)
     print(f"库内 chunk 数: {n}")
 
     if n > EXPECTED_CLEAN_CHUNKS * 1.05:
@@ -38,19 +38,13 @@ def main():
     det = HybridPoisonDetector(llm=None, db=None, ambiguous_as_poison=False)
     total, flagged = 0, 0
     hits = []
-    batch, offset = 500, 0
-    while offset < n:
-        got = d._collection.get(limit=batch, offset=offset, include=["documents"])
-        docs = got.get("documents") or []
-        if not docs:
-            break
-        for doc in docs:
-            total += 1
-            if det.detect(doc or "").is_poison:
-                flagged += 1
-                if len(hits) < 5:
-                    hits.append((doc or "")[:70])
-        offset += len(docs)
+    for item in vectordb.iter_documents(d, batch=500):
+        doc = item["content"]
+        total += 1
+        if det.detect(doc or "").is_poison:
+            flagged += 1
+            if len(hits) < 5:
+                hits.append((doc or "")[:70])
 
     rate = flagged / total if total else 0
     print(f"\n全量检测: {flagged}/{total} 条命中投毒特征（{rate:.2%}）")

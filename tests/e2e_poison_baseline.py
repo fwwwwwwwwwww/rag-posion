@@ -19,6 +19,7 @@ from langchain_community.embeddings import OllamaEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 import RAGblack as exp
+import vectordb
 from agent import build_agent
 
 MODEL = "qwen3.5:2b"
@@ -30,7 +31,7 @@ def poison_marker(task):
     return task["target_answer"][:12]
 
 
-def run_one(db, kb, task, detect_attr="toolkit"):
+def run_one(db, task, detect_attr="toolkit"):
     """注入投毒 → 跑 Agent → 返回结果。"""
     question = task["question"]
     poison_docs = exp._generate_poison_variants(task, exp.POISON_DOC_COUNT)
@@ -39,8 +40,7 @@ def run_one(db, kb, task, detect_attr="toolkit"):
     chunks = splitter.create_documents(poison_docs)
     poison_ids = db.add_documents(chunks)
 
-    agent = build_agent(db=db, llm=None, model=MODEL, knowledge_base=kb,
-                        max_steps=6)
+    agent = build_agent(db=db, llm=None, model=MODEL, max_steps=6)
 
     out = []
     try:
@@ -75,7 +75,7 @@ def run_one(db, kb, task, detect_attr="toolkit"):
                 "answer": res.answer[:150],
             })
     finally:
-        db._collection.delete(ids=poison_ids)
+        vectordb.delete_ids(db, poison_ids)
     return out
 
 
@@ -83,9 +83,7 @@ def main():
     idxs = [int(x) for x in sys.argv[1:]] or [0]
     embed = OllamaEmbeddings(model=exp.EMBEDDING_MODEL, base_url=exp.OLLAMA_BASE_URL)
     db = Chroma(embedding_function=embed, persist_directory=exp.CHROMA_PERSIST_DIR)
-    print(f"向量库: {db._collection.count()} chunks")
-    kb = exp.load_medical_knowledge_base()
-    print(f"知识库: {len(kb)} 篇\n")
+    print(f"向量库: {vectordb.count_chunks(db)} chunks")
 
     summary = []
     for idx in idxs:
@@ -94,7 +92,7 @@ def main():
         print(f"[场景 {idx}] {task['domain']} | {task['question']}")
         print(f"  攻击目标: {task['target_answer']}")
         print("=" * 74)
-        rows = run_one(db, kb, task)
+        rows = run_one(db, task)
         for r in rows:
             print(f"  第{r['run']}次: ASR={r['asr']} 投毒被检索={r['poison_retrieved']}次 "
                   f"步数={r['steps']} 拒答={r['refused']} 耗时={r['secs']}s")

@@ -1,0 +1,10 @@
+# 开发 / CI 工具依赖（运行时依赖见 requirements.txt / requirements.lock）
+#
+# 用法：
+#   pip install -r requirements.lock -r requirements-dev.txt
+#
+# httpx：FastAPI 的 TestClient 依赖它（fastapi.testclient 会在导入时检查）。
+#        缺少它时 test_agent_api.py / test_auth_api.py 会直接报
+#        "The 'httpx' package is required"，而这两个是 CI 的主力单测。
+httpx==0.28.1
+ruff>=0.6

@@ -13,6 +13,7 @@
 import random
 import sys
 import time
+from itertools import islice
 
 sys.path.insert(0, r"E:\RAG2")
 
@@ -20,6 +21,7 @@ from langchain_chroma import Chroma
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 import RAGblack as exp
+import vectordb
 
 # 批量重建时用 GPU 嵌入更快（向量数值与 CPU 一致，只是算得更快）。
 # 注意：这里**不加载对话模型**，所以不会出现显存争抢；
@@ -32,14 +34,12 @@ t0 = time.time()
 # 实测 82 分钟一个 chunk 都写不进去。显式传 99 才会回到 GPU。
 d = Chroma(embedding_function=exp.make_embeddings(num_gpu=99),
            persist_directory=exp.CHROMA_PERSIST_DIR)
-print(f"重建前: {d._collection.count()} 个 chunk", flush=True)
+print(f"重建前: {vectordb.count_chunks(d)} 个 chunk", flush=True)
 print("embedding 方式: GPU (num_gpu=99)", flush=True)
 
 # 清空
-ids = d.get()["ids"]
-if ids:
-    d._collection.delete(ids=ids)
-print(f"已清空，剩余 {d._collection.count()}", flush=True)
+vectordb.clear(d)
+print(f"已清空，剩余 {vectordb.count_chunks(d)}", flush=True)
 
 kb = exp.load_medical_knowledge_base()
 random.seed(42)
@@ -59,14 +59,14 @@ for i in range(0, len(chunks), batch):
     done = min(i + batch, len(chunks))
     print(f"  {done}/{len(chunks)}  已用 {time.time()-t0:.0f}s", flush=True)
 
-final = d._collection.count()
+final = vectordb.count_chunks(d)
 print(f"\n重建完成: {final} 个 chunk（期望 {len(chunks)}）", flush=True)
 print(f"总耗时 {time.time()-t0:.0f}s", flush=True)
 
 # 抽查：不应再出现投毒特征
 from attack.detector import HybridPoisonDetector
 det = HybridPoisonDetector(llm=None, db=None, ambiguous_as_poison=False)
-sample = d._collection.get(limit=50, include=["documents"])
-flagged = sum(1 for doc in (sample.get("documents") or [])
-              if det.detect(doc or "").is_poison)
+sample = list(islice(vectordb.iter_documents(d), 50))
+flagged = sum(1 for it in sample
+              if det.detect(it["content"] or "").is_poison)
 print(f"抽查 50 条干净文档，命中投毒特征 {flagged} 条（应为 0 或极少）", flush=True)

@@ -16,6 +16,7 @@
   cd frontend && npm run dev   （Vite 热更新，/api 代理到 8000 端口）
 """
 import logging
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.responses import FileResponse
@@ -28,14 +29,15 @@ from app.db.init_db import init_db
 
 logging.basicConfig(level=logging.INFO)
 
-app = FastAPI(title="医疗RAG问答服务", version="0.4")
 
-# 全局鉴权中间件（公开路径放行，其余 /api 请求要求 Bearer Token）
-app.middleware("http")(auth_middleware)
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    """应用启动/关闭钩子。
 
-
-@app.on_event("startup")
-def _startup():
+    用 lifespan 取代原先的 ``@app.on_event("startup")``：
+    ``on_event`` 已被 FastAPI 标记为 deprecated，且新代码推荐用 lifespan
+    统一管理需要成对出现的启动/关闭逻辑。
+    """
     init_db()
     # 首次启动创建管理员账号。密码来自 ADMIN_PASSWORD 环境变量，
     # 未配置则随机生成并打印到日志——**绝不使用硬编码默认密码**。
@@ -51,6 +53,13 @@ def _startup():
             db.close()
     except Exception:
         logging.getLogger("rag").exception("初始化默认管理员失败，请手动创建用户")
+    yield
+
+
+app = FastAPI(title="医疗RAG问答服务", version="0.4", lifespan=lifespan)
+
+# 全局鉴权中间件（公开路径放行，其余 /api 请求要求 Bearer Token）
+app.middleware("http")(auth_middleware)
 
 
 app.include_router(api_router)

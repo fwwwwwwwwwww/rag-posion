@@ -22,7 +22,6 @@ LLM 不可用时退化为上面这张确定的映射表，保证离线也能跑�
 """
 from __future__ import annotations
 
-import json
 import logging
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional

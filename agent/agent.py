@@ -34,6 +34,7 @@ from typing import Annotated, Any, Dict, List, Optional, TypedDict
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph.message import add_messages
 
+import vectordb
 from .chat_ollama import ChatReply, ToolCall, ensure_tool_model, strip_think
 from .prompts import AGENT_SYSTEM, GENERATE_PROMPT
 from .tools import ToolKit
@@ -347,14 +348,13 @@ class MedicalAgent:
         self,
         db: Any,
         llm: Any,
-        knowledge_base: Optional[List[str]] = None,
         model: Optional[str] = None,
         checkpointer: Any = None,
         max_steps: int = MAX_AGENT_STEPS,
     ):
         self.db = db
         self.llm = ensure_tool_model(llm, model=model)
-        self.toolkit = ToolKit(db, self.llm, knowledge_base=knowledge_base)
+        self.toolkit = ToolKit(db, self.llm)
         self.schemas = self.toolkit.schemas()
         self.max_steps = max_steps
         self.checkpointer = checkpointer
@@ -874,7 +874,7 @@ class MedicalAgent:
         if not self._poison_ids:
             return
         try:
-            self._db._collection.delete(ids=self._poison_ids)
+            vectordb.delete_ids(self._db, self._poison_ids)
         except Exception as e:
             logger.warning("清理投毒文档失败：%s", e)
         finally:
@@ -884,14 +884,13 @@ class MedicalAgent:
 def build_agent(
     db: Any,
     llm: Any = None,
-    knowledge_base: Optional[List[str]] = None,
     model: Optional[str] = None,
     checkpointer: Any = None,
     max_steps: int = MAX_AGENT_STEPS,
 ) -> MedicalAgent:
     """构建 Agent（对应原 ``build_rag_graph`` 的位置）。"""
     return MedicalAgent(
-        db=db, llm=llm, knowledge_base=knowledge_base,
+        db=db, llm=llm,
         model=model, checkpointer=checkpointer, max_steps=max_steps,
     )
 

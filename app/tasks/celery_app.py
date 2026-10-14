@@ -5,7 +5,6 @@
 """
 import logging
 import threading
-from typing import Optional
 
 from app.config import CELERY_ENABLED, REDIS_URL
 

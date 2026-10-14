@@ -1,4 +1,9 @@
 # 医疗 RAG 投毒实验平台 - 后端服务依赖
+#
+# 说明：这里声明的是**版本下界**（便于跟随上游修复），
+# 真正"实测通过"的精确版本组合见 requirements.lock——
+# CI 与复现实验请优先用 lock 文件。
+#
 # 核心 Web 框架
 fastapi>=0.110
 uvicorn[standard]>=0.29
@@ -8,12 +13,12 @@ pydantic>=2.6
 SQLAlchemy>=2.0
 pymysql>=1.1
 cryptography>=42.0
-alembic>=1.13
 
-# 鉴权
-python-multipart>=0.0
+# 鉴权（bcrypt 用于密码哈希；缺失时会降级为 scrypt 并告警，
+# 但降级路径不该被依赖，因此这里显式声明）
+bcrypt>=4.1
 
-# 后台任务（可选）
+# 后台任务（可选；CELERY_ENABLED=false 时会降级为线程池，无需安装）
 celery>=5.3
 redis>=5.0
 

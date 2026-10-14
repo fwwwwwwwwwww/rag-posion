@@ -4,10 +4,16 @@
 可以验证接口层本身的行为。
 """
 import json
+import os
 import sys
 from typing import Any, Dict, List
 
 sys.path.insert(0, r"E:\RAG2")
+
+# 静态 AUTH_TOKEN 已改为**默认禁用**（不再有 "rag-demo-token" 这类公开默认值）。
+# 本测试专门验证"带凭据可访问"，因此必须在导入 app.config **之前**
+# 显式注入一个仅测试用的 Token——依赖默认值等于依赖一个安全隐患。
+os.environ["AUTH_TOKEN"] = "test-static-token-for-unit-tests"
 
 from fastapi.testclient import TestClient
 from langchain_core.documents import Document

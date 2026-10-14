@@ -81,8 +81,13 @@ RETRIEVAL_K_DEFAULT = int(os.getenv("RETRIEVAL_K_DEFAULT", "3"))
 AGENT_MAX_STEPS = int(os.getenv("AGENT_MAX_STEPS", "8"))
 
 # ---- 鉴权配置 ----
-# 旧版静态 Token（保留用于脚本/接口调用，浏览器走登录会话）
-AUTH_TOKEN = os.getenv("AUTH_TOKEN", "rag-demo-token")
+# 旧版静态 Token（保留用于脚本/接口调用，浏览器走登录会话）。
+#
+# **默认留空 = 禁用静态 Token**。原先硬编码的 "rag-demo-token" 是一个
+# 公开可猜的默认凭据：只要部署时忘了改，任何人都能带着它调用受保护接口。
+# 这与本项目"绝不硬编码默认密码"的原则必须一致——需要脚本调用时，
+# 请在 .env 里显式配置一个足够长的随机串。
+AUTH_TOKEN = os.getenv("AUTH_TOKEN", "").strip()
 
 # 会话签名密钥。**生产环境必须显式配置**：
 # 未配置时启动会随机生成，副作用是进程重启后所有登录失效

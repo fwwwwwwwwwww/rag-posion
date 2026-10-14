@@ -30,7 +30,7 @@ class Experiment(Base):
     name: Mapped[str] = mapped_column(String(255), index=True)
     # 实验类型: baseline / attack / defense / detection
     exp_type: Mapped[str] = mapped_column(String(32), index=True)
-    model_name: Mapped[str] = mapped_column(String(64), default="deepseek-r1:latest")
+    model_name: Mapped[str] = mapped_column(String(64), default="qwen3.5:2b")
     # 参数快照: 如 {"k": 3, "chunk_size": 500, "poison_count": 15}
     params: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     # 状态: pending / running / completed / failed

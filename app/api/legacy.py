@@ -26,6 +26,7 @@ from app.config import (
 )
 from app.db.engine import get_db, SessionLocal
 from app.db.models import AttackLog
+import vectordb
 
 router = APIRouter(tags=["legacy"])
 
@@ -55,7 +56,7 @@ def _load_or_build_db(embedding):
     from langchain_chroma import Chroma
     db = Chroma(embedding_function=embedding,
                 persist_directory=CHROMA_PERSIST_DIR)
-    chunk_count = db._collection.count()
+    chunk_count = vectordb.count_chunks(db)
     if chunk_count > 0:
         return db, chunk_count
     kb = exp.load_medical_knowledge_base()
@@ -99,12 +100,7 @@ def _ensure_agent(db):
 
     from agent import build_agent
 
-    exp = _get_exp()
-    try:
-        kb = exp.load_medical_knowledge_base()
-    except Exception:
-        kb = []
-    agent = build_agent(db=db, llm=None, model=DEFAULT_LLM_MODEL, knowledge_base=kb)
+    agent = build_agent(db=db, llm=None, model=DEFAULT_LLM_MODEL)
     _agent_cache.update(agent=agent, db_id=id(db))
     return agent
 
@@ -225,8 +221,7 @@ async def _chat_stream(req: ChatRequest):
     finally:
         if poison_ids:
             try:
-                await asyncio.to_thread(
-                    lambda: db._collection.delete(ids=poison_ids))
+                await asyncio.to_thread(vectordb.delete_ids, db, poison_ids)
             except Exception:
                 pass
 

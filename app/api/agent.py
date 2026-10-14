@@ -19,11 +19,9 @@ import logging
 import uuid
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import select
-from sqlalchemy.orm import Session
 
 from app.config import (
     AGENT_MAX_STEPS,
@@ -31,7 +29,8 @@ from app.config import (
     EMBEDDING_MODEL,
     RETRIEVAL_K_DEFAULT,
 )
-from app.db.engine import SessionLocal, get_db
+from app.db.engine import SessionLocal
+import vectordb
 
 logger = logging.getLogger("rag.api.agent")
 
@@ -42,7 +41,7 @@ _agent_state: Dict[str, Any] = {"ready": False, "agent": None, "error": None, "k
 _init_lock = asyncio.Lock()
 
 
-def _build_agent(knowledge_base: Optional[List[str]] = None):
+def _build_agent():
     """构造带 MemorySaver 会话记忆的 Agent。"""
     import RAGblack as exp
     from agent import build_agent, new_memory
@@ -51,28 +50,21 @@ def _build_agent(knowledge_base: Optional[List[str]] = None):
 
     embedding, _legacy_llm = exp.init_ollama(DEFAULT_LLM_MODEL)
     db = Chroma(embedding_function=embedding, persist_directory=CHROMA_PERSIST_DIR)
-    chunk_count = db._collection.count()
+    chunk_count = vectordb.count_chunks(db)
 
-    kb: List[str] = []
     if chunk_count == 0:
+        # 只有库是空的才需要加载语料重建；库已有内容时不加载，
+        # 避免白白读入 33MB / 20000 篇知识库
         kb = exp.load_medical_knowledge_base()
         if not kb:
             raise RuntimeError("知识库为空且加载失败，请确认 medical_knowledge_base.json 存在")
         db = exp.build_clean_vectordb(kb, embedding)
-        chunk_count = db._collection.count()
-
-    # 检测器需要干净文档训练；向量库已有内容时按需惰性加载
-    if not kb:
-        try:
-            kb = exp.load_medical_knowledge_base()
-        except Exception as e:
-            logger.warning("加载知识库用于检测器训练失败：%s", e)
+        chunk_count = vectordb.count_chunks(db)
 
     agent = build_agent(
         db=db,
         llm=None,                       # 由 model 参数决定，走支持工具调用的对话层
         model=DEFAULT_LLM_MODEL,
-        knowledge_base=kb,
         checkpointer=new_memory(),
         max_steps=AGENT_MAX_STEPS,
     )

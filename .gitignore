@@ -36,6 +36,11 @@ rag_poison_exp/
 # ===== 数据集（train_encyclopedia.json 达 563MB，超 GitHub 100MB 限制，需自行下载 shibing624/medical）=====
 medical_dataset/
 
+# 由 medical_dataset 生成的知识库产物（约 33MB，属于可再生的数据资产而非源码）。
+# 如需让协作者开箱即用，建议走 Release / 对象存储分发，不要入库。
+# 若该文件已被跟踪，需要执行一次：git rm --cached medical_knowledge_base.json
+medical_knowledge_base.json
+
 # ===== 前端依赖与构建产物 =====
 node_modules/
 dist/

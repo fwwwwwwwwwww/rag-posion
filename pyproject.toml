@@ -1,0 +1,35 @@
+# 工具配置（ruff）。
+#
+# 为什么这里**没有** [project] / [build-system]：
+# 本项目是"扁平布局的应用"而不是可安装的库（顶层同时有 app/、agent/、attack/、
+# eval/ 四个包加 server.py / RAGblack.py / rag_graph.py / vectordb.py 四个模块），
+# 一旦声明 [project]，`pip install .` 会触发 setuptools 的自动发现并直接报错。
+# 运行时依赖统一由 requirements.txt 管理，开发者工具见 requirements-dev.txt。
+#
+# 测试约定：本项目多数测试是"脚本式"（顶层代码 + sys.exit），
+# 请用 `python tests/<脚本>.py` 运行，而不是 pytest（详见 docs/接手说明.md 第三节）。
+
+[tool.ruff]
+# 与现有代码的书写习惯保持一致，避免引入大范围无关改动
+line-length = 100
+target-version = "py310"
+
+extend-exclude = [
+    ".git",
+    "__pycache__",
+    "data",
+    "frontend",
+    "medical_dataset",
+    "rag_poison_exp",
+    "static",
+]
+
+[tool.ruff.lint]
+# 只启用"能确定性抓出真问题"的规则，保证 CI 首次接入即可通过：
+#   F401 —— 未使用的导入（死代码）
+#   F821 —— 使用了未定义的名字（真实 bug）
+#   E9   —— 语法/缩进类错误
+#
+# 刻意不启用 E501（行长）与 I（导入排序）：对 7000+ 行既有代码一次性开启纯风格
+# 规则，只会用噪音淹没真正的告警。需要收紧时在这里逐步追加即可。
+select = ["F401", "F821", "E9"]

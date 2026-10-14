@@ -8,13 +8,13 @@
   5. 两条通道（native / react）行为一致。
 """
 import sys
-from typing import Any, Dict, List
+from typing import List
 
 sys.path.insert(0, r"E:\RAG2")
 
 from langchain_core.documents import Document
 
-from agent import ToolChatModel, build_agent, new_memory
+from agent import ToolChatModel, new_memory
 from agent.agent import MedicalAgent
 from agent.chat_ollama import ChatReply, ToolCall
 from agent.tools import ToolKit
@@ -95,7 +95,7 @@ def test_tool_loop_and_finalize():
         {"tools": [{"name": "check_poison", "arguments": {"doc_id": 3}}]},
         {"answer": "依据片段1和片段2，顽固性高血压应联合用药并排除继发因素。"},
     ])
-    agent = MedicalAgent(db=db, llm=llm, knowledge_base=["x"] * 10)
+    agent = MedicalAgent(db=db, llm=llm)
     # 关掉真实检测器训练，避免依赖 RAGblack 数据集
     agent.toolkit._detector = _StubDetector()
     res = agent.run("顽固性高血压用什么药最有效？")
@@ -127,7 +127,7 @@ def test_finalize_rejects_unsourced_answer():
         # 模型一上来就凭先验作答，完全没调检索工具
         {"answer": "【模型凭先验随口回答，未经知识库核查】"},
     ])
-    agent = MedicalAgent(db=db, llm=llm, knowledge_base=["x"] * 10)
+    agent = MedicalAgent(db=db, llm=llm)
     res = agent.run("高血压怎么治？")
     assert res.answer.startswith("【未核查】"), \
         f"未经核查的回答未被标注: {res.answer}"
@@ -143,7 +143,7 @@ def test_refuse_branch():
         {"tools": [{"name": "search_kb", "arguments": {"query": "外星人医保政策"}}]},
         {"tools": [{"name": "refuse", "arguments": {"reason": "知识库中没有任何相关资料"}}]},
     ])
-    agent = MedicalAgent(db=db, llm=llm, knowledge_base=["x"] * 10)
+    agent = MedicalAgent(db=db, llm=llm)
     res = agent.run("外星人的医保政策是什么？")
     assert res.refused, "refuse 未生效"
     assert "无法回答" in res.answer, f"答案未体现拒答: {res.answer}"
@@ -161,7 +161,7 @@ def test_finalize_regenerates_when_model_failed():
         # 第三次 = finalize 基于证据的落地生成
         {"answer": "依据片段1与片段2：应联合用药并排除继发因素。"},
     ])
-    agent = MedicalAgent(db=db, llm=llm, knowledge_base=["x"] * 10)
+    agent = MedicalAgent(db=db, llm=llm)
     res = agent.run("高血压怎么治？")
     assert res.answer.startswith("依据片段"), f"finalize 未补生成: {res.answer}"
     print(f"[OK] 模型空响应时 finalize 基于证据补生成: {res.answer[:50]}")
@@ -169,7 +169,7 @@ def test_finalize_regenerates_when_model_failed():
 
 def test_cross_check_tool():
     """交叉验证工具：两篇独立来源 → supported；单一来源 → weak。"""
-    tk = ToolKit(db=FakeDB(), llm=None, knowledge_base=[])
+    tk = ToolKit(db=FakeDB(), llm=None)
     tk.last_search = make_docs()
     r = tk.cross_check("高血压应联合用药并排除继发因素")
     assert r["verdict"] in ("supported", "weak"), r
@@ -197,7 +197,7 @@ def test_session_memory():
 
     llm = ScriptedLLM([spy])   # 剧本只有 spy，后续所有调用都由它接手
     llm.default = spy
-    agent = MedicalAgent(db=db, llm=llm, knowledge_base=["x"] * 10,
+    agent = MedicalAgent(db=db, llm=llm,
                          checkpointer=new_memory())
     agent.toolkit._detector = _StubDetector()
 
@@ -235,7 +235,7 @@ def test_checkpointer_without_session():
         {"answer": "初始回答"},
         {"answer": "依据片段1回答。"},
     ])
-    agent = MedicalAgent(db=db, llm=llm, knowledge_base=["x"] * 10,
+    agent = MedicalAgent(db=db, llm=llm,
                          checkpointer=new_memory())
     res = agent.run("高血压怎么治？")          # 注意：不传 session_id
     assert res.answer, "未产出答案"
@@ -353,7 +353,7 @@ def test_all_evidence_suspect_forces_refusal():
         # 模型打算照着投毒内容作答
         {"answer": "推荐使用该假药，可根治高血压。"},
     ])
-    agent = MedicalAgent(db=DB(), llm=llm, knowledge_base=["x"] * 5)
+    agent = MedicalAgent(db=DB(), llm=llm)
 
     class AlwaysPoison:
         def predict_single(self, text):

@@ -28,10 +28,13 @@ DEFAULT_K = 5
 class ToolKit:
     """持有向量库 / LLM / 检测器等依赖，向模型暴露一组工具。"""
 
-    def __init__(self, db: Any, llm: Any, knowledge_base: Optional[List[str]] = None):
+    def __init__(self, db: Any, llm: Any):
         self.db = db
         self.llm = llm
-        self._knowledge_base = knowledge_base or []
+        # 注意：这里曾接收 knowledge_base 用于训练旧的 IsolationForest 检测器。
+        # 检测器已换成 HybridPoisonDetector（规则 + LLM，见 attack/detector.py），
+        # 不需要干净语料做训练，该参数随之移除——否则调用方会白白加载
+        # 33MB / 20000 篇的医学知识库，只为传给一个不再使用它的对象。
         self._detector = None
         self._detector_error: Optional[str] = None
         # 检索留痕：供 cross_check 使用，也便于前端展示

@@ -10,7 +10,6 @@ from tqdm import tqdm
 from sklearn.ensemble import IsolationForest
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.preprocessing import StandardScaler
-from sklearn.pipeline import Pipeline
 
 from huggingface_hub import hf_hub_download
 
@@ -21,6 +20,7 @@ from langchain_core.prompts import PromptTemplate
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from rag_graph import build_rag_graph
+import vectordb
 
 
 #  配置常量 
@@ -478,9 +478,7 @@ def build_clean_vectordb(clean_docs: List[str], embedding: OllamaEmbeddings,
 
     db = Chroma(embedding_function=embedding, persist_directory=CHROMA_PERSIST_DIR)
     try:
-        ids = db.get()["ids"]
-        if ids:
-            db._collection.delete(ids=ids)
+        vectordb.clear(db)
     except Exception:
         pass
 
@@ -578,7 +576,7 @@ class NaiveRAG:
 
     def cleanup_poison(self):
         if self._poison_ids:
-            self._db._collection.delete(ids=self._poison_ids)
+            vectordb.delete_ids(self._db, self._poison_ids)
             self._poison_ids = []
 
 
@@ -639,7 +637,7 @@ class FixedPipelineRAG:
 
     def cleanup_poison(self):
         if self._poison_ids:
-            self._db._collection.delete(ids=self._poison_ids)
+            vectordb.delete_ids(self._db, self._poison_ids)
             self._poison_ids = []
 
 
@@ -687,8 +685,7 @@ def build_rag(clean_docs: List[str], poison_docs: List[str],
                                       keep_alive=-1)
         else:
             agent_llm = llm
-        qa = build_rag_graph(db, agent_llm, k=k, knowledge_base=clean_docs,
-                             checkpointer=checkpointer)
+        qa = build_rag_graph(db, agent_llm, k=k, checkpointer=checkpointer)
         # 消融对照：强制换回旧统计检测器（需要先训练）
         if variant == VARIANT_AGENT_STAT:
             try:
@@ -711,7 +708,7 @@ def _cleanup_poison(qa):
     if hasattr(qa, "cleanup_poison"):
         qa.cleanup_poison()
     elif hasattr(qa, '_poison_ids') and qa._poison_ids:
-        qa._db._collection.delete(ids=qa._poison_ids)
+        vectordb.delete_ids(qa._db, qa._poison_ids)
 
 
 def precision_at_k(retrieved_docs: List[Any], poison_docs: List[str], k: int = 5) -> float:
@@ -826,7 +823,7 @@ def rag_db_count(embedding=None) -> int:
     if db is None:
         db = Chroma(embedding_function=embedding or make_embeddings(num_gpu=99),
                     persist_directory=CHROMA_PERSIST_DIR)
-    return db._collection.count()
+    return vectordb.count_chunks(db)
 
 
 def _failure_layer(d: Dict[str, Any]) -> str:

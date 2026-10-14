@@ -17,9 +17,9 @@ sys.path.insert(0, r"E:\RAG2")
 
 import pandas as pd
 from langchain_chroma import Chroma
-from langchain_community.embeddings import OllamaEmbeddings
 
 import RAGblack as exp
+import vectordb
 from app.config import CHROMA_PERSIST_DIR
 
 
@@ -63,7 +63,7 @@ def main():
     print(f"embedding 方式: {'CPU (num_gpu=0)' if exp.EMBED_ON_CPU else 'GPU (num_gpu=99)'}")
     # 复用磁盘上已构建好的干净向量库
     db = Chroma(embedding_function=embedding, persist_directory=CHROMA_PERSIST_DIR)
-    total = db._collection.count()
+    total = vectordb.count_chunks(db)
     print(f"向量库: {total} chunks | 模型: {exp.DEFAULT_LLM_MODEL} "
           f"| 每档重复 {runs} 次")
     # 体检：干净库应为 5571；明显偏多说明混入了历史投毒残留
@@ -105,7 +105,7 @@ def main():
             print(f"      死在: {r['failure_layers']}\n")
 
     # 终点核对：应与起点一致
-    end_count = db._collection.count()
+    end_count = vectordb.count_chunks(db)
     print("=" * 78)
     if end_count != start_count:
         print(f"⚠ 投毒清理不彻底：起点 {start_count} -> 终点 {end_count}"

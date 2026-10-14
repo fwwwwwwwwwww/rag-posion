@@ -29,7 +29,7 @@ Ollama 返回**空 content**，导致采纳性判定把成功攻击误判为"未
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 logger = logging.getLogger("rag.twophase")
 
@@ -57,22 +57,7 @@ def run_two_phase(
 
     def phase_a_warmup() -> List[str]:
         """暖场：收集 Agent 会实际用到的查询。"""
-        from agent.agent import MedicalAgent
         seen: List[str] = []
-
-        class Spy:
-            """包一层模型，记录 system 提示里出现的问题（最小侵入）。"""
-
-            def __init__(self, inner):
-                self.inner = inner
-
-            def protocol(self):
-                return self.inner.protocol()
-
-            def chat(self, messages, tools=None, system=None):
-                # Agent 每个决策轮都会把当前问题带进来；这里不做解析，
-                # 真正的查询收集由 QueryCache 在 embed_query 时完成。
-                return self.inner.chat(messages, tools=tools, system=system)
 
         for task in tasks:
             q = task["question"]

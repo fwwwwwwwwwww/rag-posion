@@ -13,6 +13,7 @@ from langchain_chroma import Chroma
 from langchain_community.embeddings import OllamaEmbeddings
 
 import RAGblack as exp
+import vectordb
 from app.config import CHROMA_PERSIST_DIR
 
 
@@ -27,7 +28,7 @@ def main():
                                  base_url=exp.OLLAMA_BASE_URL)
     db = Chroma(embedding_function=embedding, persist_directory=CHROMA_PERSIST_DIR)
     exp._vectordb_cache = db
-    print(f"向量库: {db._collection.count()} chunks | 模型: {exp.DEFAULT_LLM_MODEL}")
+    print(f"向量库: {vectordb.count_chunks(db)} chunks | 模型: {exp.DEFAULT_LLM_MODEL}")
     kb = exp.load_medical_knowledge_base()
     task = exp.ATTACK_PAIRS[idx]
 
